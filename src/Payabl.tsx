@@ -9,13 +9,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Feather from '@expo/vector-icons/Feather';
 import { router, useLocalSearchParams } from 'expo-router';
 import { CONTACTS, Receipt, Recipient, appendDigit, parsePaymentQR, rupees, validAmount } from './payment';
+import VoiceInput from './VoiceInput';
+import { spokenAmount, spokenContact } from './voice';
 
-type Screen = 'home' | 'scan' | 'contacts' | 'amount' | 'review' | 'pin' | 'success' | 'history' | 'settings' | 'alignment' | 'practice';
-type Preferences = { voice: boolean; haptics: boolean; height: number; width: number; offset: number };
-const DEFAULTS: Preferences = { voice: true, haptics: true, height: 296, width: 100, offset: 0 };
+type Screen = 'home' | 'scan' | 'contacts' | 'amount' | 'review' | 'pin' | 'success' | 'history' | 'settings' | 'practice';
+type Preferences = { voice: boolean; haptics: boolean };
+const DEFAULTS: Preferences = { voice: true, haptics: true };
 const STORAGE = 'payabl-demo-v1';
 const C = { bg: '#101010', card: '#1e1e1e', raised: '#292929', line: '#414141', white: '#f5f5f5', muted: '#b9b9b9' };
-const TITLES: Record<Screen, string> = { home: '', scan: 'Scan QR', contacts: 'Choose contact', amount: 'Enter amount', review: 'Confirm payment', pin: 'Enter demo PIN', success: 'Demo complete', history: 'Payment history', settings: 'Settings', alignment: 'Align keypad', practice: 'Practice keypad' };
+const TITLES: Record<Screen, string> = { home: '', scan: 'Scan QR', contacts: 'Choose contact', amount: 'Enter amount', review: 'Confirm payment', pin: 'Enter demo PIN', success: 'Demo complete', history: 'Payment history', settings: 'Settings', practice: 'Practice keypad' };
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'delete', '0', 'confirm'];
 type IconName = React.ComponentProps<typeof Feather>['name'];
 function Icon({ name, size = 24, color = C.white }: { name: IconName; size?: number; color?: string }) { return <Feather accessible={false} accessibilityElementsHidden importantForAccessibility="no" name={name} size={size} color={color} />; }
@@ -46,14 +48,16 @@ function AppContent() {
   const [pinLength, setPinLength] = useState(0);
   const [practiceKey, setPracticeKey] = useState('5');
   const [error, setError] = useState('');
+  const [voiceCancelToken, setVoiceCancelToken] = useState(0);
   const [permission, requestPermission] = useCameraPermissions();
   const scanLock = useRef(false);
   const submitLock = useRef(false);
   const speechGeneration = useRef(0);
-  const keypadHeight = Math.min(prefs.height, Math.max(200, height * .42));
-  const bottom = Math.max(insets.bottom, 12) + prefs.offset;
+  const voiceListening = useRef(false);
+  const keypadHeight = Math.min(296, Math.max(200, height * .42));
+  const bottom = Math.max(insets.bottom, 12);
   const isInput = ['amount', 'pin', 'practice'].includes(screen);
-  const showKeypad = ['amount', 'pin', 'alignment', 'practice'].includes(screen);
+  const showKeypad = ['amount', 'pin', 'practice'].includes(screen);
 
   useEffect(() => {
     AccessibilityInfo.isScreenReaderEnabled().then(setReader);
@@ -62,8 +66,7 @@ function AppContent() {
       if (!raw) return;
       try {
         const saved = JSON.parse(raw);
-        if (saved.prefs) setPrefs({ voice: saved.prefs.voice !== false, haptics: saved.prefs.haptics !== false,
-          height: Math.min(380, Math.max(220, Number(saved.prefs.height) || 296)), width: Math.min(100, Math.max(76, Number(saved.prefs.width) || 100)), offset: Math.min(60, Math.max(0, Number(saved.prefs.offset) || 0)) });
+        if (saved.prefs) setPrefs({ voice: saved.prefs.voice !== false, haptics: saved.prefs.haptics !== false });
         if (Array.isArray(saved.receipts)) setReceipts(saved.receipts.filter((r: Receipt) => r.id && r.recipient?.name && validAmount(r.amount)).slice(0, 20));
         if (Array.isArray(saved.contacts)) setContacts(saved.contacts.filter((r: Recipient) => typeof r.name === 'string' && typeof r.upi === 'string').slice(0, 9));
       } catch { /* Invalid cache falls back to demo defaults. */ }
@@ -79,9 +82,9 @@ function AppContent() {
     return () => { listener.remove(); Speech.stop(); };
   }, []);
   const speak = useCallback((text: string, explicit = false) => {
-    if (!foreground || (!explicit && (!prefs.voice || reader))) return;
+    if (!foreground || voiceListening.current || (!explicit && (!prefs.voice || reader))) return;
     const generation = ++speechGeneration.current;
-    Speech.stop().then(() => { if (generation === speechGeneration.current) Speech.speak(text, { language: 'en-IN', rate: .88 }); }).catch(() => {});
+    Speech.stop().then(() => { if (generation === speechGeneration.current && !voiceListening.current) Speech.speak(text, { language: 'en-IN', rate: .88 }); }).catch(() => {});
   }, [prefs.voice, reader, foreground]);
   const buzz = useCallback((kind: 'tap' | 'success' | 'error' = 'tap') => {
     if (!prefs.haptics || Platform.OS === 'web') return;
@@ -96,7 +99,7 @@ function AppContent() {
   function home() { setRecipient(null); setAmount(''); setPinLength(0); submitLock.current = false; navigate('home'); }
   function back() {
     setError(''); setPinLength(0);
-    const targets: Partial<Record<Screen, Screen>> = { amount: 'contacts', review: 'amount', pin: 'review', alignment: 'settings', practice: 'settings' };
+    const targets: Partial<Record<Screen, Screen>> = { amount: 'contacts', review: 'amount', pin: 'review', practice: 'settings' };
     if (screen === 'home' || screen === 'success') home();
     else navigate(screen === 'amount' ? entrySource : targets[screen] || 'home');
   }
@@ -107,29 +110,42 @@ function AppContent() {
   function describe(): string {
     const common = 'Use Back at the top to return.';
     switch (screen) {
-      case 'home': return 'Demo. No money moves. Scan QR: top button. Pay family: bottom button. Settings: top right. Repeat: bottom of screen.';
+      case 'home': return 'Payabl. No money moves. Scan QR: top button. Pay family: bottom button. Settings: top right.';
       case 'scan': return permission?.granted ? `Point the rear camera at the payment QR. The recipient will be read when detected. ${common}` : 'Camera access needed. Choose Allow camera. Back returns home.';
-      case 'contacts': return `Choose contact. ${contacts.map(c => c.name).join(', ')}. ${common}`;
-      case 'amount': return `Paying ${recipient?.name}. ${Number(amount || 0)} rupees. Enter whole rupees. Next: bottom right. Delete: bottom left. ${recipient?.demo ? '' : 'Recipient name unverified.'}`;
+      case 'contacts': return `Choose contact. ${contacts.map(c => c.name).join(', ')}. Speak name uses your microphone. ${common}`;
+      case 'amount': return `Paying ${recipient?.name}. ${Number(amount || 0)} rupees. Enter whole rupees, or choose Speak amount. Next: bottom right. Delete: bottom left. ${recipient?.demo ? '' : 'Recipient name unverified.'}`;
       case 'review': return `${Number(amount)} rupees to ${recipient?.name}. UPI ID ${recipient?.upi}. ${recipient?.demo ? '' : 'Name unverified.'} Continue to PIN, or Back to change amount.`;
       case 'pin': return 'Enter any four demo digits. Never use your real PIN. Pay: bottom right. Delete: bottom left.';
       case 'success': return `Demo complete. ${Number(amount)} rupees to ${recipient?.name}. No money moved. Done returns home.`;
       case 'history': return receipts.length ? `Demo activity. Select a receipt to hear its details. ${common}` : `No demo payments yet. ${common}`;
-      case 'settings': return `Settings. Voice ${prefs.voice ? 'on' : 'off'}. Vibration ${prefs.haptics ? 'on' : 'off'}. Keypad alignment, keypad practice and payment history are below.`;
-      case 'alignment': return 'Overlay alignment. 2 makes the keypad taller, 8 shorter, 4 narrower, 6 wider, 1 moves it up, 7 down. 5 resets dimensions. Confirm opens practice. Changes save automatically. 0 returns home.';
+      case 'settings': return `Settings. Spoken guidance ${prefs.voice ? 'on' : 'off'}. Vibration ${prefs.haptics ? 'on' : 'off'}. Keypad practice and payment history are below.`;
       case 'practice': return 'Practice keypad. Every key reads its location. 5 is the centre anchor. Delete and Confirm read their locations too. Use Back at the top to finish.';
     }
   }
   useEffect(() => {
     if (!ready) return;
     const instructions = describe();
-    const timer = setTimeout(() => { if (reader) AccessibilityInfo.announceForAccessibility(instructions); else speak(instructions); }, 350);
+    const timer = setTimeout(() => { if (voiceListening.current) return; if (reader) AccessibilityInfo.announceForAccessibility(instructions); else speak(instructions); }, 350);
     return () => clearTimeout(timer);
     // Announce once per screen transition; digit input has separate feedback.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, ready, reader]);
   function report(message: string) { setError(message); speak(message); if (reader) AccessibilityInfo.announceForAccessibility(message); buzz('error'); }
   function select(c: Recipient, initialAmount = '', source: 'scan' | 'contacts' = 'contacts') { setEntrySource(source); setRecipient(c); setAmount(initialAmount); submitLock.current = false; setPinLength(0); navigate('amount'); }
+  function prepareVoice() { voiceListening.current = true; speechGeneration.current++; Speech.stop(); setError(''); }
+  const finishVoice = useCallback(() => { voiceListening.current = false; }, []);
+  function voiceMessage(message: string) { if (reader) AccessibilityInfo.announceForAccessibility(message); else speak(message, true); }
+  function acceptVoice(text: string) {
+    if (screen === 'contacts') {
+      const contact = spokenContact(text, contacts);
+      if (!contact) return report('Could not match a contact. Say the full name, or choose a contact button.');
+      select(contact);
+    } else if (screen === 'amount') {
+      const value = spokenAmount(text);
+      if (!value) return report('Could not understand the amount. Say a whole amount from 1 to 100000 rupees, or use the keypad.');
+      setAmount(value); setError(''); buzz('success'); voiceMessage(`${Number(value)} rupees to ${recipient?.name}. Check the amount, then press Next.`);
+    }
+  }
   function readReceipt(r: Receipt) { speak('Demo payment ' + r.amount + ' rupees to ' + r.recipient.name + '. ' + new Date(r.time).toLocaleString('en-IN') + '. No money moved.', true); }
   function scan(data: string) {
     if (scanLock.current) return;
@@ -146,11 +162,12 @@ function AppContent() {
       submitLock.current = true;
       setReceipts(items => [{ id: `DEMO-${Date.now()}`, recipient, amount, time: new Date().toISOString() }, ...items].slice(0, 20));
       setPinLength(0); buzz('success'); navigate('success');
-    } else if (screen === 'alignment') navigate('practice');
-    else if (screen === 'practice') { setPracticeKey('confirm'); speak('Confirm. Bottom row, right.', true); }
+    } else if (screen === 'practice') { setPracticeKey('confirm'); speak('Confirm. Bottom row, right.', true); }
     else if (screen === 'success') home(); else speak(describe(), true);
   }
   function keyPress(key: string) {
+    finishVoice();
+    setVoiceCancelToken(value => value + 1);
     buzz(); setError('');
     if (key === 'confirm') return confirm();
     if (screen === 'practice') { setPracticeKey(key); const i = KEYS.indexOf(key); speak(`${key === 'delete' ? 'Delete' : key}. Row ${Math.floor(i / 3) + 1}, column ${i % 3 + 1}.${key === '5' ? ' Centre anchor.' : ''}`, true); return; }
@@ -174,11 +191,7 @@ function AppContent() {
     else if (screen === 'settings') {
       if (key === '1') { setPrefs(p => ({ ...p, voice: !p.voice })); speak(`Voice guidance ${prefs.voice ? 'off' : 'on'}.`, true); }
       else if (key === '2') { setPrefs(p => ({ ...p, haptics: !p.haptics })); speak(`Haptics ${prefs.haptics ? 'off' : 'on'}.`, true); }
-      else if (key === '3') navigate('alignment'); else if (key === '6') navigate('practice'); else speak(describe(), true);
-    } else if (screen === 'alignment') {
-      const delta: Record<string, Partial<Preferences>> = { '2': { height: Math.min(380, prefs.height + 8) }, '8': { height: Math.max(220, prefs.height - 8) }, '4': { width: Math.max(76, prefs.width - 2) }, '6': { width: Math.min(100, prefs.width + 2) }, '1': { offset: Math.min(60, prefs.offset + 4) }, '7': { offset: Math.max(0, prefs.offset - 4) } };
-      if (key === '5') setPrefs(p => ({ ...p, height: 296, width: 100, offset: 0 })); else if (delta[key]) setPrefs(p => ({ ...p, ...delta[key] }));
-      speak('Alignment adjusted.', true);
+      else if (key === '6') navigate('practice'); else speak(describe(), true);
     }
   }
   function keyLabel(key: string): string {
@@ -186,11 +199,10 @@ function AppContent() {
     if (key === 'delete') return screen === 'amount' || screen === 'pin' ? 'Delete last digit' : 'Back';
     if (key === 'confirm') return screen === 'pin' ? 'Confirm demo payment' : screen === 'amount' ? 'Review amount' : screen === 'review' ? 'Enter demo PIN' : 'Confirm';
     const labels: Partial<Record<Screen, Record<string, string>>> = {
-      home: { '1': 'Scan QR', '2': 'Frequent', '3': 'Activity', '4': 'Settings', '5': 'Repeat', '6': 'Practice', '0': 'Home' },
+      home: { '1': 'Scan QR', '2': 'Pay family', '3': 'Activity', '4': 'Settings', '6': 'Practice', '0': 'Home' },
       contacts: Object.fromEntries(contacts.map((c, i) => [String(i + 1), c.name])),
-      settings: { '1': 'Voice', '2': 'Haptics', '3': 'Align', '6': 'Practice', '0': 'Home' },
+      settings: { '1': 'Spoken guidance', '2': 'Haptics', '6': 'Practice', '0': 'Home' },
       scan: { '1': 'Allow camera', '2': 'Try sample', '5': 'Retry scan', '0': 'Home' },
-      alignment: { '1': 'Move up', '2': 'Taller', '4': 'Narrower', '5': 'Reset fit', '6': 'Wider', '7': 'Move down', '8': 'Shorter', '0': 'Home' },
     }; return labels[screen]?.[key] || key;
   }
   function content() {
@@ -205,10 +217,11 @@ function AppContent() {
       {permission?.status === 'denied' && !permission.canAskAgain && <Text style={s.body}>Enable camera access for Expo Go in iPhone Settings.</Text>}
       {!!error && <Action title="Scan again" onPress={() => { scanLock.current = false; setError(''); }} />}
     </>;
-    if (screen === 'contacts') return <View style={s.contactList}>{contacts.map(c => <ContactRow key={c.upi} contact={c} onSelect={select} />)}</View>;
+    if (screen === 'contacts') return <View style={s.contactList}><VoiceInput key={`contact-voice-${voiceCancelToken}`} label="Speak name" phrases={contacts.map(c => c.name)} onPrepare={prepareVoice} onFinish={finishVoice} onResult={acceptVoice} onMessage={voiceMessage} />{contacts.map(c => <ContactRow key={c.upi} contact={c} onSelect={select} />)}</View>;
     if (screen === 'amount') return <>
       <Text style={s.payeeName}>To {recipient?.name}</Text>
       <Text accessibilityLabel={Number(amount || 0) + ' rupees'} accessibilityLiveRegion="polite" style={s.paymentAmount}>{rupees(amount)}</Text>
+      <VoiceInput key={`amount-voice-${voiceCancelToken}`} label="Speak amount" phrases={[]} onPrepare={prepareVoice} onFinish={finishVoice} onResult={acceptVoice} onMessage={voiceMessage} />
       {!recipient?.demo && <Text style={s.body}>Recipient name unverified. Check the UPI ID on the next screen.</Text>}
     </>;
     if (screen === 'review') return <View style={s.paymentDetails}>
@@ -225,23 +238,19 @@ function AppContent() {
       {receipts.map(r => <ReceiptRow key={r.id} receipt={r} onRead={readReceipt} />)}
     </>;
     if (screen === 'settings') return <>
-      <Pressable accessibilityRole="switch" accessibilityLabel="Voice guidance" accessibilityState={{ checked: prefs.voice }} onPress={() => keyPress('1')} style={s.setting}><Text style={[s.body, s.grow]}>Voice</Text><Text style={s.body}>{prefs.voice ? 'On' : 'Off'}</Text></Pressable>
+      <Pressable accessibilityRole="switch" accessibilityLabel="Spoken guidance" accessibilityState={{ checked: prefs.voice }} onPress={() => keyPress('1')} style={s.setting}><Text style={[s.body, s.grow]}>Spoken guidance</Text><Text style={s.body}>{prefs.voice ? 'On' : 'Off'}</Text></Pressable>
       <Pressable accessibilityRole="switch" accessibilityLabel="Vibration" accessibilityState={{ checked: prefs.haptics }} onPress={() => keyPress('2')} style={s.setting}><Text style={[s.body, s.grow]}>Vibration</Text><Text style={s.body}>{prefs.haptics ? 'On' : 'Off'}</Text></Pressable>
-      <Action title="Align keypad" onPress={() => navigate('alignment')} /><Action title="Practice keypad" onPress={() => navigate('practice')} /><Action title="Payment history" onPress={() => navigate('history')} />
+      <Action title="Practice keypad" onPress={() => navigate('practice')} /><Action title="Payment history" onPress={() => navigate('history')} />
       <Action title="Test QR payment" onPress={() => select({ name: 'Corner Store', upi: 'cornerstore@demo', demo: true }, '', 'scan')} />
-    </>;
-    if (screen === 'alignment') return <>
-      <Text style={s.body}>2 / 8: taller / shorter{'\n'}4 / 6: narrower / wider{'\n'}1 / 7: up / down{'\n'}5: reset</Text><Text style={s.caption}>{Math.round(keypadHeight)} pt high · {prefs.width}% wide · {prefs.offset} pt lift</Text><Text style={s.body}>Confirm to practice.</Text>
     </>;
     return <><Text style={s.body}>Press a key to hear its position.</Text><Text style={s.practiceDigit}>{practiceKey === 'delete' ? 'Delete' : practiceKey === 'confirm' ? 'Confirm' : practiceKey}</Text></>;
   }
-  const phone = <View style={[s.phone, { paddingTop: Math.max(insets.top, 12) }]}>
-    <View style={s.header}>{screen === 'home' ? <><Text style={s.caption}>Demo</Text><Pressable accessibilityRole="button" accessibilityLabel="Settings" onPress={() => navigate('settings')} style={s.headerButton}><Text style={s.headerText}>Settings</Text></Pressable></> : <><Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={back} style={s.headerButton}><Text style={s.headerText}>Back</Text></Pressable>{['amount', 'review', 'pin'].includes(screen) && <Pressable accessibilityRole="button" accessibilityLabel="Cancel payment" onPress={home} style={s.headerButton}><Text style={s.headerText}>Cancel</Text></Pressable>}</>}</View>
+  const phone = <View style={[s.phone, { paddingTop: Math.max(insets.top, 12), paddingBottom: showKeypad ? 0 : Math.max(insets.bottom, 12) }]}>
+    <View style={s.header}>{screen === 'home' ? <><Text accessibilityRole="header" accessibilityLabel="Payabl" style={s.wordmark}>payabl<Text style={s.wordmarkDot}>.</Text></Text><Pressable accessibilityRole="button" accessibilityLabel="Settings" onPress={() => navigate('settings')} style={s.headerButton}><Text style={s.headerText}>Settings</Text></Pressable></> : <><Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={back} style={s.headerButton}><Text style={s.headerText}>Back</Text></Pressable>{['amount', 'review', 'pin'].includes(screen) && <Pressable accessibilityRole="button" accessibilityLabel="Cancel payment" onPress={home} style={s.headerButton}><Text style={s.headerText}>Cancel</Text></Pressable>}</>}</View>
     {screen === 'home' ? content() : <ScrollView style={s.content} contentContainerStyle={s.contentInner} showsVerticalScrollIndicator={false}><Text accessibilityRole="header" style={s.title}>{TITLES[screen]}</Text>{content()}{!!error && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={s.error}>{error}</Text>}</ScrollView>}
     {screen === 'review' && <View style={s.primaryFooter}><Action title="Continue to PIN" light onPress={confirm} /></View>}
     {screen === 'success' && <View style={s.primaryFooter}><Action title="Done" light onPress={home} /></View>}
-    <Pressable accessibilityRole="button" accessibilityLabel="Repeat instructions" onPress={() => speak(describe(), true)} style={[s.repeatButton, !showKeypad && { marginBottom: Math.max(insets.bottom, 12) }]}><Text style={s.repeatText}>Repeat</Text></Pressable>
-    {showKeypad && <View style={[s.keypadContainer, { paddingBottom: bottom }]}><View testID="fixed-keypad" style={[s.keypad, { height: keypadHeight, width: `${prefs.width}%` }]}>{KEYS.map(key => {
+    {showKeypad && <View style={[s.keypadContainer, { paddingBottom: bottom }]}><View testID="fixed-keypad" style={[s.keypad, { height: keypadHeight, width: '100%' }]}>{KEYS.map(key => {
       const label = keyLabel(key); const isConfirm = key === 'confirm';
       const index = KEYS.indexOf(key);
       const spokenLabel = screen === 'pin' && /^\d$/.test(key) ? `Private PIN key. Row ${Math.floor(index / 3) + 1}, column ${index % 3 + 1}` : label === key ? key : `${/^\d$/.test(key) ? key + '. ' : ''}${label}`;
@@ -255,11 +264,11 @@ function AppContent() {
 export default function App() { return <SafeAreaProvider><AppContent /></SafeAreaProvider>; }
 
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: C.bg, alignItems: 'center' }, phoneFrame: { flex: 1, width: '100%', maxWidth: 460 }, phone: { flex: 1, backgroundColor: C.bg },
-  header: { minHeight: 64, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, headerButton: { minWidth: 96, minHeight: 64, alignItems: 'center', justifyContent: 'center' }, headerText: { color: C.white, fontSize: 22, fontWeight: '600' },
-  homeActions: { flex: 1, padding: 16, gap: 16 }, mainAction: { flex: 1, minHeight: 120, borderWidth: 2, borderColor: C.white, borderRadius: 8, justifyContent: 'center', alignItems: 'center', padding: 20 }, mainActionText: { color: C.white, fontSize: 36, lineHeight: 44, fontWeight: '700', textAlign: 'center' }, light: { backgroundColor: C.white }, pressed: { opacity: .65 },
+  root: { flex: 1, backgroundColor: C.bg, alignItems: 'center' }, phoneFrame: { flex: 1, minHeight: 0, width: '100%', maxWidth: 460 }, phone: { flex: 1, minHeight: 0, backgroundColor: C.bg },
+  header: { minHeight: 72, flexShrink: 0, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, headerButton: { minWidth: 96, minHeight: 64, alignItems: 'center', justifyContent: 'center' }, headerText: { color: C.white, fontSize: 22, fontWeight: '600' }, wordmark: { color: C.white, fontSize: 32, lineHeight: 42, fontWeight: '700', letterSpacing: -1.5 }, wordmarkDot: { color: C.muted },
+  homeActions: { flex: 1, minHeight: 0, padding: 20, gap: 20 }, mainAction: { flex: 1, minHeight: 120, borderWidth: 2, borderColor: C.white, borderRadius: 28, overflow: 'hidden', justifyContent: 'center', alignItems: 'center', padding: 20 }, mainActionText: { color: C.white, fontSize: 36, lineHeight: 48, fontWeight: '700', textAlign: 'center', flexShrink: 1 }, light: { backgroundColor: C.white }, pressed: { opacity: .65 },
   content: { flex: 1 }, contentInner: { padding: 20, gap: 24, paddingBottom: 28 }, title: { color: C.white, fontSize: 28, lineHeight: 36, fontWeight: '600' }, body: { color: C.white, fontSize: 20, lineHeight: 29 }, caption: { color: C.muted, fontSize: 16, lineHeight: 24 }, grow: { flex: 1 },
-  action: { minHeight: 72, padding: 20, borderWidth: 2, borderColor: C.white, borderRadius: 8, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 10 }, actionText: { color: C.white, fontSize: 22, lineHeight: 30, fontWeight: '600', flexShrink: 1 }, primaryFooter: { padding: 16, paddingBottom: 8 }, repeatButton: { minHeight: 64, justifyContent: 'center', alignItems: 'center', borderTopWidth: 1, borderColor: C.line, paddingHorizontal: 20 }, repeatText: { color: C.white, fontSize: 20, fontWeight: '600' },
+  action: { minHeight: 72, padding: 20, borderWidth: 2, borderColor: C.white, borderRadius: 8, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 10 }, actionText: { color: C.white, fontSize: 22, lineHeight: 30, fontWeight: '600', flexShrink: 1 }, primaryFooter: { padding: 16, paddingBottom: 8 },
   contactList: { gap: 16 }, personRow: { minHeight: 104, padding: 24, borderWidth: 2, borderColor: C.white, borderRadius: 8, justifyContent: 'center' }, personName: { color: C.white, fontSize: 26, lineHeight: 34, fontWeight: '600' }, payeeName: { color: C.white, fontSize: 26, lineHeight: 34 }, paymentAmount: { color: C.white, fontSize: 58, lineHeight: 72, fontWeight: '600', marginVertical: 16 }, paymentDetails: { gap: 24, paddingTop: 16 },
   scanSurface: { height: 320, backgroundColor: C.card, overflow: 'hidden', borderWidth: 1, borderColor: C.line }, cameraPlaceholder: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }, scanGuide: { position: 'absolute', top: '20%', bottom: '20%', left: '15%', right: '15%', borderWidth: 3, borderColor: C.white },
   pinRow: { flexDirection: 'row', gap: 24, justifyContent: 'center', paddingVertical: 24 }, pinSlot: { width: 24, height: 24, borderWidth: 2, borderColor: C.white, borderRadius: 12 }, pinFilled: { backgroundColor: C.white },

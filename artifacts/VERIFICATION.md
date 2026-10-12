@@ -27,8 +27,8 @@ Not verified on physical hardware: camera decoding, speech audibility, haptic de
 ## Essential UI revision
 
 - Removed all marketing headings, desktop promotion, logos, illustrations, decorative avatars, helper subtitles, and the home history link.
-- Home now exposes Scan QR (upper touch area), Pay family (lower touch area), Settings (top right), and Repeat (bottom). Spoken guidance identifies these positions.
-- Contacts show names; amount entry shows recipient and amount; confirmation shows amount, recipient and UPI ID. Back and Cancel have text labels. Repeat instructions are shorter.
+- Home exposes Scan QR (upper touch area), Pay family (lower touch area), and Settings (top right). Spoken guidance identifies these positions.
+- Contacts show names; amount entry shows recipient and amount; confirmation shows amount, recipient and UPI ID. Back and Cancel have text labels.
 - History, keypad setup/practice, and camera-free QR testing are in Settings.
 - Pay family → Dad → ₹250 → Next → Continue to PIN → four demo digits → Pay → Done passed in the browser.
 - TypeScript and lint checks passed. Updated iOS and web bundles compiled. Screenshot saved as payabl-essential-home.jpg.

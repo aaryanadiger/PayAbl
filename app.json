@@ -12,6 +12,7 @@
       "bundleIdentifier": "com.payabl.prototype"
     },
     "android": {
+      "package": "com.payabl.prototype",
       "adaptiveIcon": {
         "backgroundColor": "#101010",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -30,7 +31,14 @@
         }
       ],
       "expo-router",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Allow Payabl to hear the contact name or payment amount you choose to speak.",
+          "speechRecognitionPermission": "Allow Payabl to turn your spoken contact name or amount into text."
+        }
+      ]
     ],
     "web": {
       "favicon": "./assets/favicon.png"
