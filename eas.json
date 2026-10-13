@@ -1,14 +1,27 @@
 {
-  "cli": { "appVersionSource": "local" },
+  "cli": {
+    "appVersionSource": "local"
+  },
   "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
+    },
     "preview": {
       "distribution": "internal",
       "node": "24.13.0",
-      "android": { "buildType": "apk" }
+      "android": {
+        "buildType": "apk"
+      }
     },
-    "development": {
-      "developmentClient": true,
-      "distribution": "internal"
+    "production": {
+      "node": "24.13.0",
+      "android": {
+        "buildType": "app-bundle"
+      }
     }
   }
 }
