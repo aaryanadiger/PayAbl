@@ -1,5 +1,28 @@
 # Verification, 12 October 2026
 
+## Account, contacts, and APK revision — 13 October 2026
+
+- Removed keypad practice and test QR screens/actions. Home keeps the two payment actions with separately labelled Account and Settings icons.
+- Added a locally saved account profile, contact import with native permission prompts, limited-access handling, contact search, and paged contact rows.
+- Imported phone numbers remain simulated recipients; they are not assumed to be UPI IDs. Contact-name matching now preserves Unicode and rejects duplicate names.
+- Voice entry starts automatically on supported installed phone builds, requests permissions, speaks before recording, and gives a vibration when listening starts. PIN entry remains manual.
+- Added a Voice payment Android launcher shortcut and OPEN_APP_FEATURE declaration. Google Assistant discovery still needs Google's registration/testing. Siri integration is not claimed for Expo Go.
+- Lint, TypeScript, and eight parsing tests pass. Expo config confirms contacts and microphone permissions, with Android WRITE_CONTACTS blocked.
+- Browser checks confirm account persistence and settings without practice controls. Native prompts, speech, and blind-user usability require actual phone testing.
+- Initial EAS build failed because the old lockfile omitted Linux build dependencies. The replacement lockfile passes a clean-install dry run; the retry targets Node 24.13.0.
+- Automatic guidance now retries after Expo Go becomes active, selects an installed English voice, uses an independent iOS speech audio session, and enables guidance during migration from the older prototype cache. The downloadable APK is being rebuilt with this fix.
+- Final EAS Android APK build 61ef79e8-f8e7-4ac0-8ae8-5c7f803d5302 finished successfully. Download instructions are in ANDROID-DOWNLOAD.md; Payabl.apk and its QR code are saved in artifacts. Actual phone speech and permission dialogs still need on-device testing.
+
+## Voice input and fixed keypad
+
+- Added contact-name and whole-rupee voice input with native permission requests, denial/settings recovery, cancellation, a 15-second timeout, and cleanup on navigation or backgrounding.
+- App speech pauses during recording. Recognized amounts receive spoken readback; PIN entry and payment confirmation remain manual.
+- Removed manual keypad alignment and persisted fit preferences. All entry screens use the same fixed keypad geometry.
+- Expo configuration introspection confirms iOS microphone/speech usage descriptions and Android RECORD_AUDIO permission.
+- Eight payment and voice parser tests pass. Lint passes without warnings and TypeScript passes. iOS and web exports complete.
+- Browser review confirms voice controls on contacts and amount screens, normal payment review, and no voice input on PIN entry.
+- Native recognition and permission dialogs still require testing in a signed development build. Exact Google Pay keypad dimensions are not yet measured.
+
 - TypeScript check passed.
 - Required Expo lint check passed with zero warnings after Router setup.
 - Five unit tests passed: encoded UPI parsing; unsupported/unsafe QR rejection; whole-rupee amount bounds; native parser independence from React Native's partial URL implementation; malformed/duplicate-field rejection.

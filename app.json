@@ -9,17 +9,26 @@
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.payabl.prototype"
+      "bundleIdentifier": "com.payabl.prototype",
+      "infoPlist": {
+        "NSSpeechRecognitionUsageDescription": "Allow Payabl to turn your spoken contact name or amount into text.",
+        "NSMicrophoneUsageDescription": "Allow Payabl to hear the contact name or payment amount you choose to speak."
+      }
     },
     "android": {
       "package": "com.payabl.prototype",
+      "blockedPermissions": ["android.permission.WRITE_CONTACTS"],
       "adaptiveIcon": {
         "backgroundColor": "#101010",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "plugins": [
       [
@@ -32,6 +41,8 @@
       ],
       "expo-router",
       "expo-font",
+      "./plugins/withVoiceShortcut",
+      ["expo-contacts", { "contactsPermission": "Allow Payabl to import contact names and phone numbers for choosing a payment recipient. Contacts stay on this device." }],
       [
         "expo-speech-recognition",
         {
@@ -42,6 +53,13 @@
     ],
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "160e67dc-2e5d-4cd0-8d2a-cc50d94a785e"
+      }
+    },
+    "owner": "ndverano"
   }
 }

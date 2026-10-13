@@ -7,9 +7,10 @@ import type { ExpoSpeechRecognitionModule } from 'expo-speech-recognition';
 type Recognition = typeof ExpoSpeechRecognitionModule;
 type Subscription = { remove: () => void };
 
-export default function VoiceInput({ label, phrases, onResult, onPrepare, onMessage, onFinish }: {
+export default function VoiceInput({ label, phrases, onResult, onPrepare, onMessage, onFinish, onStarted, autoStart = false, prompt }: {
   label: string; phrases: string[]; onResult: (text: string) => void;
   onPrepare: () => void; onMessage: (message: string) => void; onFinish: () => void;
+  onStarted: () => void; autoStart?: boolean; prompt: string;
 }) {
   const [active, setActive] = useState(false);
   const [message, setMessage] = useState('');
@@ -18,6 +19,7 @@ export default function VoiceInput({ label, phrases, onResult, onPrepare, onMess
   const module = useRef<Recognition | null>(null);
   const listeners = useRef<Subscription[]>([]);
   const timeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startRef = useRef<() => Promise<void>>(async () => {});
 
   const clear = useCallback(() => {
     session.current++;
@@ -32,6 +34,12 @@ export default function VoiceInput({ label, phrases, onResult, onPrepare, onMess
     });
     return () => { listener.remove(); clear(); };
   }, [clear]);
+  useEffect(() => { startRef.current = start; });
+  useEffect(() => {
+    if (!autoStart || Platform.OS === 'web' || !requireOptionalNativeModule('ExpoSpeechRecognition')) return;
+    const timer = setTimeout(() => { void startRef.current(); }, 1000);
+    return () => clearTimeout(timer);
+  }, [autoStart]);
 
   async function start() {
     if (active) { clear(); setActive(false); setMessage(''); return; }
@@ -54,6 +62,7 @@ export default function VoiceInput({ label, phrases, onResult, onPrepare, onMess
         throw new Error('Allow microphone and speech recognition to use voice input.');
       }
       await Speech.stop();
+      await new Promise<void>(resolve => Speech.speak(prompt, { language: 'en-IN', volume: 1, rate: .9, useApplicationAudioSession: false, onDone: resolve, onStopped: resolve, onError: () => resolve() }));
       if (token !== session.current) return;
       let received = false;
       const fail = (text: string) => {
@@ -61,7 +70,7 @@ export default function VoiceInput({ label, phrases, onResult, onPrepare, onMess
         clear(); setActive(false); setMessage(text); onMessage(text);
       };
       listeners.current = [
-        recognition.addListener('start', () => { if (token === session.current) setMessage('Listening…'); }),
+        recognition.addListener('start', () => { if (token === session.current) { setMessage('Listening…'); onStarted(); } }),
         recognition.addListener('result', event => {
           if (token !== session.current || !event.isFinal || received) return;
           const text = event.results[0]?.transcript?.trim();

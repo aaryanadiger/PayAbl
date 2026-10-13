@@ -1,5 +1,11 @@
 {
+  "cli": { "appVersionSource": "local" },
   "build": {
+    "preview": {
+      "distribution": "internal",
+      "node": "24.13.0",
+      "android": { "buildType": "apk" }
+    },
     "development": {
       "developmentClient": true,
       "distribution": "internal"

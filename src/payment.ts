@@ -1,4 +1,4 @@
-export type Recipient = { name: string; upi: string; demo?: boolean };
+export type Recipient = { name: string; upi: string; demo?: boolean; phone?: string };
 export type Receipt = { id: string; recipient: Recipient; amount: string; time: string };
 export const CONTACTS: Recipient[] = [
   { name: 'Ananya', upi: 'ananya@demo', demo: true },

@@ -14,4 +14,7 @@ test('voice contact selection requires one exact name', () => {
   assert.equal(spokenContact('corner store', CONTACTS)?.name, 'Corner Store');
   assert.equal(spokenContact('Dan', CONTACTS), null);
   assert.equal(spokenContact('Dad', [...CONTACTS, { name: 'Dad', upi: 'other@demo' }]), null);
+  const local = [{ name: 'माँ', upi: '', phone: '1234567890' }];
+  assert.equal(spokenContact('माँ', local)?.name, 'माँ');
+  assert.equal(spokenContact('पापा', local), null);
 });

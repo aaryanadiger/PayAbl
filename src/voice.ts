@@ -34,7 +34,7 @@ export function spokenAmount(transcript: string): string | null {
 }
 
 export function spokenContact(transcript: string, contacts: Recipient[]): Recipient | null {
-  const normalize = (text: string) => text.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().replace(/\s+/g, ' ');
+  const normalize = (text: string) => text.toLocaleLowerCase().normalize('NFC').replace(/[^\p{L}\p{N}\s]/gu, '').trim().replace(/\s+/g, ' ');
   const name = normalize(transcript).replace(/^(pay\s+(?:to\s+)?|to\s+)/, '');
   const matches = contacts.filter(contact => normalize(contact.name) === name);
   return matches.length === 1 ? matches[0] : null;
