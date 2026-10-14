@@ -3,7 +3,7 @@ import { AccessibilityInfo, AppState, BackHandler, Linking, Platform, Pressable,
 import { requireOptionalNativeModule } from 'expo';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useCameraPermissions } from 'expo-camera';
 import * as Speech from 'expo-speech';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -11,6 +11,8 @@ import Feather from '@expo/vector-icons/Feather';
 import { router, useLocalSearchParams } from 'expo-router';
 import { CONTACTS, Receipt, Recipient, appendDigit, parsePaymentQR, rupees, validAmount } from './payment';
 import VoiceInput from './VoiceInput';
+import GuidedQRScanner from './GuidedQRScanner';
+import { selectSpeechService, speechErrorMessage } from './voiceService';
 import { spokenAmount, spokenContact } from './voice';
 import AccountPage, { Profile } from './AccountPage';
 import { importPhoneContacts } from './phoneContacts';
@@ -36,7 +38,7 @@ function ReceiptRow({ receipt, onRead }: { receipt: Receipt; onRead: (receipt: R
 function AppContent() {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
-  const params = useLocalSearchParams<{ screen?: string }>();
+  const params = useLocalSearchParams<{ screen?: string; voice?: string }>();
   const screen: Screen = params.screen && Object.hasOwn(TITLES, params.screen) ? params.screen as Screen : 'home';
   const [prefs, setPrefs] = useState(DEFAULTS);
   const [ready, setReady] = useState(false);
@@ -56,6 +58,7 @@ function AppContent() {
   const [pinLength, setPinLength] = useState(0);
   const [error, setError] = useState('');
   const [voiceCancelToken, setVoiceCancelToken] = useState(0);
+  const [scanAttempt, setScanAttempt] = useState(0);
   const [permission, requestPermission] = useCameraPermissions();
   const scanLock = useRef(false);
   const submitLock = useRef(false);
@@ -110,7 +113,7 @@ function AppContent() {
     if (kind === 'tap') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     else Haptics.notificationAsync(kind === 'success' ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Error).catch(() => {});
   }, [prefs.haptics]);
-  function navigate(next: Screen) { setError(''); setVoiceCancelToken(0); router.setParams({ screen: next }); if (next === 'scan') scanLock.current = false; }
+  function navigate(next: Screen) { setError(''); setVoiceCancelToken(0); router.setParams({ screen: next, voice: undefined }); if (next === 'scan') scanLock.current = false; }
   useEffect(() => {
     // A direct link or reload cannot restore an in-progress payment or PIN.
     if (!recipient && ['amount', 'review', 'pin', 'success'].includes(screen)) router.setParams({ screen: 'home' });
@@ -167,6 +170,7 @@ function AppContent() {
       const { ExpoSpeechRecognitionModule } = await import('expo-speech-recognition');
       const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
       if (!permission.granted) return report('Allow microphone and speech recognition for Payabl in phone Settings.');
+      if (Platform.OS === 'android' && !selectSpeechService(ExpoSpeechRecognitionModule.getSpeechRecognitionServices(), ExpoSpeechRecognitionModule.getDefaultRecognitionService().packageName)) return report(speechErrorMessage('service-not-allowed'));
       setPrefs(current => ({ ...current, autoVoice: true })); voiceMessage('Voice payments allowed. Payabl will ask for a name and amount.');
     } catch { report('Voice input is unavailable. The contact buttons and keypad still work.'); }
   }
@@ -176,6 +180,10 @@ function AppContent() {
   function select(c: Recipient, initialAmount = '', source: 'scan' | 'contacts' = 'contacts') { setEntrySource(source); setRecipient(c); setAmount(initialAmount); submitLock.current = false; setPinLength(0); navigate('amount'); }
   function prepareVoice() { voiceListening.current = true; speechGeneration.current++; Speech.stop(); setError(''); }
   const finishVoice = useCallback(() => { voiceListening.current = false; }, []);
+  const guideQR = useCallback((message: string) => {
+    if (reader) AccessibilityInfo.announceForAccessibility(message);
+    else speak(message);
+  }, [reader, speak]);
   function voiceMessage(message: string) { if (reader) AccessibilityInfo.announceForAccessibility(message); else speak(message, true); }
   useEffect(() => {
     if (!ready || screen !== 'contacts' || contactsAsked || Platform.OS === 'web') return;
@@ -202,6 +210,7 @@ function AppContent() {
     try { const p = parsePaymentQR(data); buzz('success'); select(p.recipient, p.amount, 'scan'); }
     catch (e) { report((e as Error).message); }
   }
+  function retryScan() { scanLock.current = false; setError(''); setScanAttempt(value => value + 1); }
   function confirm() {
     if (screen === 'amount') { if (!validAmount(amount)) return report('Enter 1 to 100000 whole rupees.'); navigate('review'); }
     else if (screen === 'review') { setPinLength(0); navigate('pin'); }
@@ -231,7 +240,7 @@ function AppContent() {
     else if (screen === 'scan') {
       if (key === '1') requestPermission().catch(() => report('Could not request camera permission.'));
       else if (key === '2') select({ name: 'Corner Store', upi: 'cornerstore@demo', demo: true }, '', 'scan');
-      else if (key === '5') { scanLock.current = false; speak(describe(), true); }
+      else if (key === '5') { retryScan(); speak(describe(), true); }
     }
     else if (screen === 'success') { if (key === '3') navigate('history'); }
     else if (screen === 'history') { const r = receipts[Number(key) - 1]; if (r) speak(`Demo receipt. ${Number(r.amount)} rupees to ${r.recipient.name}. ${new Date(r.time).toLocaleString('en-IN')}. No money moved.`, true); }
@@ -258,13 +267,13 @@ function AppContent() {
     </View>;
     if (screen === 'scan') return <>
       <Text style={s.body}>Point the rear camera at the QR.</Text>
-      <View style={s.scanSurface}>{permission?.granted && foreground ? <CameraView style={StyleSheet.absoluteFill} facing="back" barcodeScannerSettings={{ barcodeTypes: ['qr'] }} onBarcodeScanned={({ data }) => scan(data)} /> : <View style={s.cameraPlaceholder}><Text style={s.body}>Camera access needed</Text></View>}{permission?.granted && <View pointerEvents="none" style={s.scanGuide} />}</View>
+      {permission?.granted && foreground && !error ? <GuidedQRScanner key={scanAttempt} enabled haptics={prefs.haptics} onRead={scan} onGuide={guideQR} onError={report} /> : <View style={s.scanSurface}><View style={s.cameraPlaceholder}><Text style={s.body}>{permission?.granted ? 'Camera paused' : 'Camera access needed'}</Text></View></View>}
       {!permission?.granted && <Action title="Allow camera" light onPress={() => keyPress('1')} />}
-      {permission?.status === 'denied' && !permission.canAskAgain && <Text style={s.body}>Enable camera access for Expo Go in iPhone Settings.</Text>}
-      {!!error && <Action title="Scan again" onPress={() => { scanLock.current = false; setError(''); }} />}
+      {permission?.status === 'denied' && !permission.canAskAgain && <Action title="Open camera settings" onPress={() => { void Linking.openSettings().catch(() => report('Open phone Settings and allow camera access for Payabl.')); }} />}
+      {!!error && <Action title="Scan again" onPress={retryScan} />}
     </>;
     if (screen === 'contacts') return <View style={s.contactList}>
-      {importing ? <Text accessibilityLiveRegion="polite" style={s.body}>Importing contacts…</Text> : <VoiceInput key={`contact-voice-${voiceCancelToken}`} label="Speak name" prompt="Say a contact name after the vibration." autoStart={prefs.autoVoice && voiceCancelToken === 0} phrases={contacts.slice(0, 50).map(c => c.name)} onPrepare={prepareVoice} onFinish={finishVoice} onStarted={voiceStarted} onResult={acceptVoice} onMessage={voiceMessage} />}
+      {importing ? <Text accessibilityLiveRegion="polite" style={s.body}>Importing contacts…</Text> : <VoiceInput key={`contact-voice-${voiceCancelToken}`} label="Speak name" prompt="Say a contact name after the vibration." autoStart={(prefs.autoVoice || params.voice === '1') && voiceCancelToken === 0} phrases={contacts.slice(0, 50).map(c => c.name)} onPrepare={prepareVoice} onFinish={finishVoice} onStarted={voiceStarted} onResult={acceptVoice} onMessage={voiceMessage} />}
       <TextInput accessibilityLabel="Search contacts by name or phone" placeholder="Search contacts" placeholderTextColor={C.muted} value={query} onChangeText={value => { setQuery(value); setVisibleContacts(20); setVoiceCancelToken(count => count + 1); }} style={s.search} />
       {filteredContacts.slice(0, visibleContacts).map(c => <ContactRow key={c.phone || c.upi} contact={c} onSelect={select} />)}
       {!filteredContacts.length && <Text style={s.body}>No matching contacts.</Text>}
