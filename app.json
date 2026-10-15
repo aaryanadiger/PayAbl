@@ -8,6 +8,7 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "ios": {
+      "buildNumber": "2",
       "supportsTablet": false,
       "bundleIdentifier": "com.payabl.prototype",
       "infoPlist": {
@@ -16,6 +17,7 @@
       }
     },
     "android": {
+      "versionCode": 2,
       "package": "com.payabl.prototype",
       "blockedPermissions": ["android.permission.WRITE_CONTACTS"],
       "adaptiveIcon": {
@@ -27,7 +29,8 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.VIBRATE"
       ]
     },
     "plugins": [
@@ -47,6 +50,7 @@
         "expo-speech-recognition",
         {
           "microphonePermission": "Allow Payabl to hear the contact name or payment amount you choose to speak.",
+          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox", "com.google.android.tts"],
           "speechRecognitionPermission": "Allow Payabl to turn your spoken contact name or amount into text."
         }
       ]

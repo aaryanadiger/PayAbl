@@ -47,7 +47,7 @@
     "web": "expo start --web",
     "tunnel": "expo start --tunnel",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test tests/payment.test.ts tests/voice.test.ts",
+    "test": "node --experimental-strip-types --test tests/payment.test.ts tests/voice.test.ts tests/guidance.test.ts",
     "lint": "expo lint"
   },
   "private": true

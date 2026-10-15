@@ -3,6 +3,7 @@ import { AppState, Linking, Platform, Pressable, StyleSheet, Text, View } from '
 import { requireOptionalNativeModule } from 'expo';
 import * as Speech from 'expo-speech';
 import type { ExpoSpeechRecognitionModule } from 'expo-speech-recognition';
+import { boundedPrompt, selectSpeechService, speechErrorMessage } from './voiceService';
 
 type Recognition = typeof ExpoSpeechRecognitionModule;
 type Subscription = { remove: () => void };
@@ -20,17 +21,22 @@ export default function VoiceInput({ label, phrases, onResult, onPrepare, onMess
   const listeners = useRef<Subscription[]>([]);
   const timeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startRef = useRef<() => Promise<void>>(async () => {});
+  const starting = useRef(false);
+  const requestingPermission = useRef(false);
 
   const clear = useCallback(() => {
     session.current++;
+    starting.current = false;
     if (timeout.current) clearTimeout(timeout.current);
     listeners.current.splice(0).forEach(listener => listener.remove());
     module.current?.abort();
+    void Speech.stop();
     onFinish();
   }, [onFinish]);
   useEffect(() => {
     const listener = AppState.addEventListener('change', state => {
-      if (state === 'background') { clear(); setActive(false); setMessage(''); }
+      // Permission sheets on some Android phones background the activity.
+      if (state === 'background' && !requestingPermission.current) { clear(); setActive(false); setMessage(''); }
     });
     return () => { listener.remove(); clear(); };
   }, [clear]);
@@ -42,8 +48,9 @@ export default function VoiceInput({ label, phrases, onResult, onPrepare, onMess
   }, [autoStart]);
 
   async function start() {
-    if (active) { clear(); setActive(false); setMessage(''); return; }
+    if (active || starting.current) { clear(); setActive(false); setMessage(''); return; }
     clear();
+    starting.current = true;
     const token = session.current;
     setActive(true); setMessage('Preparing microphone…'); setSettings(false);
     onPrepare();
@@ -54,23 +61,47 @@ export default function VoiceInput({ label, phrases, onResult, onPrepare, onMess
       const { ExpoSpeechRecognitionModule: recognition } = await import('expo-speech-recognition');
       if (token !== session.current) return;
       module.current = recognition;
-      if (!recognition.isRecognitionAvailable()) throw new Error('Speech recognition is unavailable on this device. Use the keypad or contact buttons.');
-      const permission = await recognition.requestPermissionsAsync();
+      requestingPermission.current = true;
+      const permission = await recognition.requestPermissionsAsync().finally(() => { requestingPermission.current = false; });
       if (token !== session.current) return;
       if (!permission.granted) {
         setSettings(Platform.OS !== 'web' && !permission.canAskAgain);
         throw new Error('Allow microphone and speech recognition to use voice input.');
       }
+      if (AppState.currentState === 'background') throw new Error('Return to Payabl and tap Speak to start the microphone.');
+      const service = Platform.OS === 'android'
+        ? selectSpeechService(recognition.getSpeechRecognitionServices(), recognition.getDefaultRecognitionService().packageName)
+        : undefined;
+      if (Platform.OS === 'android' ? !service : !recognition.isRecognitionAvailable()) {
+        setSettings(Platform.OS !== 'web');
+        throw new Error(speechErrorMessage('service-not-allowed'));
+      }
       await Speech.stop();
-      await new Promise<void>(resolve => Speech.speak(prompt, { language: 'en-IN', volume: 1, rate: .9, useApplicationAudioSession: false, onDone: resolve, onStopped: resolve, onError: () => resolve() }));
+      if (token !== session.current) return;
+      await boundedPrompt(done => Speech.speak(prompt, { language: 'en-IN', volume: 1, rate: .9, useApplicationAudioSession: false, onDone: done, onStopped: done, onError: done }));
+      if (token !== session.current) return;
+      await Speech.stop();
+      // Release TTS/assistant audio before the Android recognizer takes focus.
+      await new Promise(resolve => setTimeout(resolve, 250));
       if (token !== session.current) return;
       let received = false;
+      let retried = false;
+      let retrying = false;
+      let currentService = service;
+      let language = 'en-IN';
       const fail = (text: string) => {
         if (token !== session.current) return;
         clear(); setActive(false); setMessage(text); onMessage(text);
       };
+      const beginRecognition = () => {
+        if (token !== session.current) return;
+        timeout.current = setTimeout(() => fail('Listening stopped. Try again or use the buttons.'), 15000);
+        try {
+          recognition.start({ lang: language, interimResults: true, continuous: false, maxAlternatives: 1, contextualStrings: phrases, androidRecognitionServicePackage: currentService, recordingOptions: { persist: false } });
+        } catch { fail('The speech service could not start. Check your phone’s speech recognition settings.'); }
+      };
       listeners.current = [
-        recognition.addListener('start', () => { if (token === session.current) { setMessage('Listening…'); onStarted(); } }),
+        recognition.addListener('start', () => { if (token === session.current) { retrying = false; setMessage('Listening…'); onStarted(); } }),
         recognition.addListener('result', event => {
           if (token !== session.current || !event.isFinal || received) return;
           const text = event.results[0]?.transcript?.trim();
@@ -79,14 +110,31 @@ export default function VoiceInput({ label, phrases, onResult, onPrepare, onMess
           clear(); setActive(false); setMessage(''); onResult(text);
         }),
         recognition.addListener('error', event => {
+          if (token !== session.current) return;
           if (event.error === 'aborted') return;
-          if (event.error === 'not-allowed') setSettings(Platform.OS !== 'web');
-          fail(event.error === 'not-allowed' ? 'Allow microphone and speech recognition in Settings.' : event.error === 'network' ? 'Speech recognition needs a connection. Try again or use the keypad.' : 'Could not hear you. Try again or use the buttons.');
+          const alternate = Platform.OS === 'android'
+            ? selectSpeechService(recognition.getSpeechRecognitionServices().filter(item => item !== currentService), '')
+            : undefined;
+          // Xiaomi/vendor recognizers can fail with a client/service error even
+          // after permission is granted. Retry once with another installed service.
+          const switchService = ['client', 'service-not-allowed'].includes(event.error) && !!alternate;
+          const switchLanguage = event.error === 'language-not-supported';
+          if (Platform.OS === 'android' && !retried && (switchService || switchLanguage || event.error === 'busy')) {
+            retried = true; retrying = true;
+            if (switchService) currentService = alternate;
+            if (switchLanguage) language = 'en-US';
+            if (timeout.current) clearTimeout(timeout.current);
+            setMessage('Restarting speech recognition…');
+            recognition.abort();
+            timeout.current = setTimeout(beginRecognition, 600);
+            return;
+          }
+          if (event.error === 'not-allowed' || event.error === 'service-not-allowed' || event.error === 'audio-capture') setSettings(Platform.OS !== 'web');
+          fail(speechErrorMessage(event.error));
         }),
-        recognition.addListener('end', () => { if (!received) fail('No speech received. Try again or use the buttons.'); }),
+        recognition.addListener('end', () => { if (!received && !retrying) fail('No speech received. Try again or use the buttons.'); }),
       ];
-      recognition.start({ lang: 'en-IN', interimResults: false, continuous: false, maxAlternatives: 1, contextualStrings: phrases, recordingOptions: { persist: false } });
-      timeout.current = setTimeout(() => fail('Listening stopped. Try again or use the buttons.'), 15000);
+      beginRecognition();
     } catch (error) {
       if (token !== session.current) return;
       clear(); setActive(false);
