@@ -12,6 +12,10 @@ export const QR_PATTERNS: Record<Direction, number[]> = {
   down: [0, 220, 100, 220], center: [0, 50, 70, 50, 70, 50], unknown: [0, 100],
 };
 
+export function shouldAnnounceQR(previous: { direction: string; time: number }, direction: Direction, now: number) {
+  return previous.direction !== direction && (!previous.direction || now - previous.time >= 2500);
+}
+
 export function qrDirection(bounds: Bounds, points: Point[], view: { width: number; height: number }): Direction {
   if (view.width <= 0 || view.height <= 0) return 'unknown';
   let { x, y } = bounds.origin;

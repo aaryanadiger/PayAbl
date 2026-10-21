@@ -3,10 +3,10 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
 
 export type Profile = { name: string; phone: string };
-export default function AccountPage({ profile, contactCount, busy, onSave, onImport, onVoice, onHistory, onMessage }: {
+export default function AccountPage({ profile, contactCount, busy, onInteract, onSave, onImport, onVoice, onHistory, onMessage }: {
   profile: Profile; contactCount: number; busy: boolean;
   onSave: (profile: Profile) => void; onImport: () => void; onVoice: () => void; onHistory: () => void;
-  onMessage: (message: string) => void;
+  onMessage: (message: string) => void; onInteract: () => void;
 }) {
   const [name, setName] = useState(profile.name);
   const [phone, setPhone] = useState(profile.phone);
@@ -17,17 +17,17 @@ export default function AccountPage({ profile, contactCount, busy, onSave, onImp
     if (cleanPhone && !/^\+?\d{7,15}$/.test(cleanPhone)) { setError('Enter a valid phone number, or leave it empty.'); onMessage('Enter a valid phone number, or leave it empty.'); return; }
     setError(''); onSave({ name: name.trim(), phone: cleanPhone });
   }
-  function button(label: string, action: () => void, disabled = false) { return <Pressable accessibilityRole="button" accessibilityState={{ disabled }} disabled={disabled} onPress={action} style={s.button}><Text style={s.text}>{label}</Text></Pressable>; }
+  function button(label: string, action: () => void, disabled = false) { return <Pressable accessibilityRole="button" accessibilityState={{ disabled }} disabled={disabled} onPress={() => { onInteract(); action(); }} style={s.button}><Text style={s.text}>{label}</Text></Pressable>; }
   return <View style={s.container}>
     <View style={s.avatar} accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants"><Feather accessible={false} name="user" size={40} color="#f5f5f5" /></View>
     <Text style={s.text}>Demo account · No bank linked</Text>
-    <View style={s.field}><Text style={s.label}>Your name</Text><TextInput accessibilityLabel="Your name" autoComplete="name" value={name} onChangeText={setName} maxLength={60} style={s.input} /></View>
-    <View style={s.field}><Text style={s.label}>Phone number (optional)</Text><TextInput accessibilityLabel="Phone number, optional" autoComplete="tel" keyboardType="phone-pad" value={phone} onChangeText={setPhone} maxLength={20} style={s.input} /></View>
+    <View style={s.field}><Text style={s.label}>Your name</Text><TextInput accessibilityLabel="Your name" onFocus={onInteract} autoComplete="name" value={name} onChangeText={setName} maxLength={60} style={s.input} /></View>
+    <View style={s.field}><Text style={s.label}>Phone number (optional)</Text><TextInput accessibilityLabel="Phone number, optional" onFocus={onInteract} autoComplete="tel" keyboardType="phone-pad" value={phone} onChangeText={setPhone} maxLength={20} style={s.input} /></View>
     {!!error && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={s.text}>{error}</Text>}
     {button('Save account', save)}
     {button(busy ? 'Importing contacts…' : 'Import phone contacts', onImport, busy)}
     <Text style={s.label}>{contactCount} phone contacts · Stored on this device</Text>
-    {button('Allow voice payments', onVoice)}
+    {button('Allow microphone', onVoice)}
     {button('Payment history', onHistory)}
   </View>;
 }

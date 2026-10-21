@@ -17,11 +17,24 @@ export function speechErrorMessage(code: string): string {
   }
 }
 
-// Some Android TTS engines never deliver onDone. Do not let them block the mic.
-export function boundedPrompt(play: (done: () => void) => void, maxMs = 6000): Promise<void> {
+// A stalled native speech operation must not leave Ask PayAbl preparing forever.
+export function withSpeechDeadline<T>(operation: Promise<T>, maxMs = 2000): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, maxMs);
-    const done = () => { clearTimeout(timer); resolve(); };
-    try { play(done); } catch (error) { clearTimeout(timer); reject(error); }
+    const timer = setTimeout(() => reject(new Error('Spoken guidance did not stop. Tap Stop speaking, then try again.')), maxMs);
+    operation.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); });
   });
+}
+
+// Verify quiet rather than depending on a cold Android engine's stop promise.
+export async function stopSpeechForInput(stop: () => Promise<void>, isSpeaking: () => Promise<boolean>, maxMs = 8000, intervalMs = 100): Promise<void> {
+  void stop().catch(() => {});
+  const deadline = Date.now() + maxMs;
+  let quiet = 0;
+  while (Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+    const speaking = await withSpeechDeadline(isSpeaking(), Math.max(1, deadline - Date.now()));
+    quiet = speaking ? 0 : quiet + 1;
+    if (quiet >= 2) return;
+  }
+  throw new Error('Spoken guidance is still active. Stop speaking, then try again.');
 }

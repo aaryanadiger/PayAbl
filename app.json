@@ -2,22 +2,22 @@
   "expo": {
     "name": "Payabl",
     "slug": "payabl",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "scheme": "payabl",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "ios": {
-      "buildNumber": "2",
+      "buildNumber": "3",
       "supportsTablet": false,
       "bundleIdentifier": "com.payabl.prototype",
       "infoPlist": {
-        "NSSpeechRecognitionUsageDescription": "Allow Payabl to turn your spoken contact name or amount into text.",
-        "NSMicrophoneUsageDescription": "Allow Payabl to hear the contact name or payment amount you choose to speak."
+        "NSSpeechRecognitionUsageDescription": "Allow Payabl to understand the navigation command, contact name, or amount you choose to speak.",
+        "NSMicrophoneUsageDescription": "Allow Payabl to hear your command, contact name, or amount when you tap Ask PayAbl. Never speak a payment PIN."
       }
     },
     "android": {
-      "versionCode": 2,
+      "versionCode": 3,
       "package": "com.payabl.prototype",
       "blockedPermissions": ["android.permission.WRITE_CONTACTS"],
       "adaptiveIcon": {
@@ -49,9 +49,9 @@
       [
         "expo-speech-recognition",
         {
-          "microphonePermission": "Allow Payabl to hear the contact name or payment amount you choose to speak.",
+          "microphonePermission": "Allow Payabl to hear your command, contact name, or amount when you tap Ask PayAbl. Never speak a payment PIN.",
           "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox", "com.google.android.tts"],
-          "speechRecognitionPermission": "Allow Payabl to turn your spoken contact name or amount into text."
+          "speechRecognitionPermission": "Allow Payabl to understand the navigation command, contact name, or amount you choose to speak."
         }
       ]
     ],

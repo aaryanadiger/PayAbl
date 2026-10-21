@@ -2,11 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, Vibration, View } from 'react-native';
 import { CameraView, type BarcodeScanningResult } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
-import { QR_HINTS, QR_PATTERNS, qrDirection, trackQR, type QRTrack } from './qrGuidance';
+import { QR_HINTS, QR_PATTERNS, qrDirection, shouldAnnounceQR, trackQR, type QRTrack } from './qrGuidance';
 
 export default function GuidedQRScanner({ enabled, haptics, onRead, onGuide, onError }: {
   enabled: boolean; haptics: boolean; onRead: (data: string) => void;
-  onGuide: (message: string) => void; onError: (message: string) => void;
+  onGuide: (message: string) => boolean; onError: (message: string) => void;
 }) {
   const [hint, setHint] = useState('Searching for a QR. Move the phone slowly.');
   const [detected, setDetected] = useState('');
@@ -41,12 +41,11 @@ export default function GuidedQRScanner({ enabled, haptics, onRead, onGuide, onE
     const message = QR_HINTS[direction]; setHint(message);
     if (now - lastBuzz.current >= 1000) {
       lastBuzz.current = now;
-      const changed = feedback.current.direction !== direction;
-      const announce = changed || now - feedback.current.time >= 3500;
+      const announce = shouldAnnounceQR(feedback.current, direction, now);
       if (haptics && Platform.OS === 'android') Vibration.vibrate(QR_PATTERNS[direction]);
       else if (haptics && Platform.OS === 'ios') void Haptics.impactAsync(direction === 'center' ? Haptics.ImpactFeedbackStyle.Heavy : Haptics.ImpactFeedbackStyle.Light).catch(() => {});
       // Do not interrupt the same spoken direction every camera frame.
-      if (announce) { onGuide(message); feedback.current = { time: now, direction }; }
+      if (announce && onGuide(message)) feedback.current = { time: now, direction };
     }
     if (next.accept) read(event.data);
   }

@@ -1,10 +1,17 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { qrDirection, trackQR } from '../src/qrGuidance.ts';
-import { boundedPrompt, selectSpeechService, speechErrorMessage } from '../src/voiceService.ts';
+import { qrDirection, shouldAnnounceQR, trackQR } from '../src/qrGuidance.ts';
+import { selectSpeechService, speechErrorMessage, stopSpeechForInput, withSpeechDeadline } from '../src/voiceService.ts';
 
 const view = { width: 300, height: 400 };
 const box = (x: number, y: number) => ({ origin: { x, y }, size: { width: 40, height: 40 } });
+test('QR speech suppresses repeated directions and rapid direction changes', () => {
+  assert.equal(shouldAnnounceQR({ direction: '', time: 0 }, 'left', 100), true);
+  const previous = { direction: 'left', time: 1000 };
+  assert.equal(shouldAnnounceQR(previous, 'left', 10000), false);
+  assert.equal(shouldAnnounceQR(previous, 'right', 2000), false);
+  assert.equal(shouldAnnounceQR(previous, 'right', 3500), true);
+});
 test('QR guidance uses preview coordinates for each axis and center', () => {
   for (const [x, y, direction] of [[10, 180, 'left'], [250, 180, 'right'], [130, 10, 'up'], [130, 350, 'down'], [130, 180, 'center']] as const) {
     assert.equal(qrDirection(box(x, y), [], view), direction);
@@ -34,8 +41,16 @@ test('recognition discovers current Google service while preserving device defau
   assert.match(speechErrorMessage('audio-capture'), /microphone/);
   assert.match(speechErrorMessage('service-not-allowed'), /Google/);
 });
-test('a missing Android TTS completion callback cannot stall microphone preparation', async () => {
-  await boundedPrompt(() => {}, 10);
-  await boundedPrompt(done => done(), 1000);
-  await assert.rejects(boundedPrompt(() => { throw new Error('TTS unavailable'); }), /TTS unavailable/);
+test('a stalled native speech operation fails safely instead of starting a competing microphone', async () => {
+  await assert.rejects(withSpeechDeadline(new Promise(() => {}), 10), /Stop speaking/);
+  assert.equal(await withSpeechDeadline(Promise.resolve('stopped')), 'stopped');
+  await assert.rejects(withSpeechDeadline(Promise.reject(new Error('TTS unavailable'))), /TTS unavailable/);
+});
+
+test('microphone handoff verifies quiet even if Android stop promise does not settle', async () => {
+  let checks = 0;
+  await stopSpeechForInput(() => new Promise(() => {}), async () => ++checks < 3, 100, 1);
+  assert.equal(checks, 4);
+  await assert.rejects(stopSpeechForInput(async () => {}, async () => true, 10, 1), /still active/);
+  await assert.rejects(stopSpeechForInput(async () => {}, () => new Promise(() => {}), 10, 1), /Stop speaking/);
 });
