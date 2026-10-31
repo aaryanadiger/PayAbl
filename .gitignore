@@ -31,6 +31,8 @@ yarn-error.*
 # test output
 coverage/
 /artifacts/*.apk
+/artifacts/*.ipa
+/build/
 
 # macOS
 .DS_Store

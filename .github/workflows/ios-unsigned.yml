@@ -1,0 +1,57 @@
+name: Build iPhone IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/iphone-free-account-install]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iphone-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Show native toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          pod --version
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - name: Generate native iOS project and install pods
+        run: npx expo prebuild --platform ios --no-install && pod install --project-directory=ios
+      - name: Build standalone unsigned Release IPA
+        run: bash scripts/build-ios-unsigned.sh
+      - name: Upload IPA and build metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: PayAbl-iPhone-${{ github.sha }}
+          path: |
+            build/iphone/PayAbl-unsigned.ipa
+            build/iphone/build-info.txt
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iPhone-build-log-${{ github.sha }}
+          path: build/iphone/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 7
