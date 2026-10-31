@@ -54,6 +54,8 @@ The first visit to Pay family requests contacts access. Payabl reads only permit
 
 ## Commands
 
+For standalone iPhone installation from Windows with a free Apple account, see [iPhone build, installation, and seven-day refresh](docs/IPHONE_FROM_WINDOWS.md).
+
 - `npm start` — start Expo
 - `npm run start:go` — start explicitly for Expo Go
 - `npm run start:dev` — start for the development app with native voice input
